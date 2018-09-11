@@ -119,7 +119,7 @@ class BackgroundSubtractor():
                     _func(this_frame, _bg, new_img[ii])
             return new_img
         
-        bg = ~self.bgnd.astype(np.uint8)
+        bg = self.bgnd.astype(np.uint8)
         if self.is_light_background:
             notbg = ~bg # should check if necessary at all to have self.bgnd as int32
             ss = _remove_func(image, cv2.add, notbg)
