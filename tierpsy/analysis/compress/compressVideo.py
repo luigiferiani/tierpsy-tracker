@@ -6,15 +6,21 @@ Created on Thu Apr  2 13:19:58 2015
 """
 import os
 
+import re
 import cv2
+import pdb
 import tables
 import numpy as np
 
+from contextlib import ExitStack
+
 from tierpsy.analysis.compress.BackgroundSubtractor import BackgroundSubtractorVideo
-from tierpsy.analysis.compress.extractMetaData import store_meta_data, read_and_save_timestamp
+from tierpsy.analysis.compress.extractMetaData import store_meta_data, read_and_save_timestamp, get_ffprobe_metadata
 from tierpsy.analysis.compress.selectVideoReader import selectVideoReader
 from tierpsy.helper.params import compress_defaults, set_unit_conversions
 from tierpsy.helper.misc import TimeCounter, print_flush, TABLE_FILTERS
+
+from tierpsy.analysis.compress.FOVMultiWellsSplitter import FOVMultiWellsSplitter
 
 def getROIMask(
         image,
@@ -117,16 +123,16 @@ def normalizeImage(img):
     # normalise image intensities if the data type is other
     # than uint8
     image = image.astype(np.double)
-    
+
     imax = img.max()
     imin = img.min()
     factor = 255/(imax-imin)
-    
+
     imgN = ne.evaluate('(img-imin)*factor')
     imgN = imgN.astype(np.uint8)
 
     return imgN, (imin, imax)
- 
+
 def reduceBuffer(Ibuff, is_light_background):
     if is_light_background:
         return np.min(Ibuff, axis=0)
@@ -170,43 +176,43 @@ def createImgGroup(fid, name, tot_frames, im_height, im_width, is_expandable=Tru
 
     return img_dataset
 
-def initMasksGroups(fid, expected_frames, im_height, im_width, 
+def initMasksGroups(fid, expected_frames, im_height, im_width,
     attr_params, save_full_interval, is_expandable=True):
 
     # open node to store the compressed (masked) data
     mask_dataset = createImgGroup(fid, "/mask", expected_frames, im_height, im_width, is_expandable)
-    
+
 
     tot_save_full = (expected_frames // save_full_interval) + 1
     full_dataset = createImgGroup(fid, "/full_data", tot_save_full, im_height, im_width, is_expandable)
     full_dataset._v_attrs['save_interval'] = save_full_interval
-    
+
 
     assert all(x in ['expected_fps', 'is_light_background', 'microns_per_pixel'] for x in attr_params)
     set_unit_conversions(mask_dataset, **attr_params)
     set_unit_conversions(full_dataset, **attr_params)
 
     if is_expandable:
-        mean_intensity = fid.create_earray('/', 
+        mean_intensity = fid.create_earray('/',
                                         'mean_intensity',
                                         atom=tables.Float32Atom(),
                                         shape=(0,),
                                         expectedrows=expected_frames,
                                         filters=TABLE_FILTERS)
     else:
-        mean_intensity = fid.create_carray('/', 
+        mean_intensity = fid.create_carray('/',
                                         'mean_intensity',
                                         atom=tables.Float32Atom(),
                                         shape=(expected_frames,),
                                         filters=TABLE_FILTERS)
-    
+
     return mask_dataset, full_dataset, mean_intensity
 
 
 
 def compressVideo(video_file, masked_image_file, mask_param,  expected_fps=25,
                   microns_per_pixel=None, bgnd_param ={}, buffer_size=-1,
-                  save_full_interval=-1, max_frame=1e32, is_extract_timestamp=False):
+                  save_full_interval=-1, max_frame=1e32, is_extract_timestamp=False, fovsplitter_param={}):
     '''
     Compresses video by selecting pixels that are likely to have worms on it and making the rest of
     the image zero. By creating a large amount of redundant data, any lossless compression
@@ -224,13 +230,13 @@ def compressVideo(video_file, masked_image_file, mask_param,  expected_fps=25,
     '''
 
     #get the default values if there is any bad parameter
-    output = compress_defaults(masked_image_file, 
-                                expected_fps, 
-                                buffer_size = buffer_size, 
+    output = compress_defaults(masked_image_file,
+                                expected_fps,
+                                buffer_size = buffer_size,
                                 save_full_interval = save_full_interval)
 
-    buffer_size = output['buffer_size'] 
-    save_full_interval = output['save_full_interval'] 
+    buffer_size = output['buffer_size']
+    save_full_interval = output['save_full_interval']
 
     if len(bgnd_param) > 0:
         is_bgnd_subtraction = True
@@ -238,28 +244,75 @@ def compressVideo(video_file, masked_image_file, mask_param,  expected_fps=25,
     else:
         is_bgnd_subtraction = False
 
+    if len(fovsplitter_param) > 0:
+        is_fov_tosplit = True
+    else:
+        is_fov_tosplit = False
+
     # processes identifier.
-    base_name = masked_image_file.rpartition('.')[0].rpartition(os.sep)[-1]
-    
+    base_name = masked_image_file.rpartition('.')[0].rpartition(os.sep)[-1]; print(base_name)
+
     # select the video reader class according to the file type.
-    vid = selectVideoReader(video_file)
-    
+    vid = selectVideoReader(video_file); print(vid)
+
+    # TODO: make this triggered by input
+    is_fov_tosplit=True
+
+    # TODO: get these from input
+    if is_fov_tosplit:
+        fovsplitter_param['total_n_wells'] = 48
+        fovsplitter_param['whichsideup'] = 'upright'
+    # initialise the class for FOV splitting
+    if is_fov_tosplit:
+        # TODO: change class creator so it only needs the video name? by using 
+        # Tierpsy's functions such as selectVideoReader it can then read the first image by itself
+        regex = r"(?<=(20\d{6}\_\d{6}\.))\d{8}"
+        camera_name = re.search(regex, video_file.lower()).group(0)
+        ret, img = vid.read()
+        # close and reopen the video, to restart from the beginning
+        vid.release()
+        vid = selectVideoReader(video_file); 
+        fovsplitter = FOVMultiWellsSplitter(img,
+                                            camera_name,
+                                            total_n_wells=fovsplitter_param['total_n_wells'],
+                                            whichsideup=fovsplitter_param['whichsideup'])
+        fovsplitter.plot_wells()
+
+    # create a list of masked_image_files
+    if is_fov_tosplit:
+        # create a list of masked_image_files, one per well
+        masked_image_files = list()
+        for wellname in fovsplitter.circles["well"]:
+            # inserts the well name just before the extension
+            _head, _tail = os.path.splitext(masked_image_file)
+            _masked_image_file = _head + '_' + wellname + _tail
+            masked_image_files.append(_masked_image_file)
+    else:
+        # only one, but chuck it into a list anyway so it works the same
+        masked_image_files = [masked_image_file]
+            
+    print(masked_image_files)
     # delete any previous  if it existed
+    for _masked_image_file in masked_image_files:
+        with tables.File(_masked_image_file, "w") as mask_fid:
+            pass
+    # DEBUGGING ONLY:
     with tables.File(masked_image_file, "w") as mask_fid:
-        pass
-    
+            pass
+        
     #Extract metadata
     if is_extract_timestamp:
         # extract and store video metadata using ffprobe
         #NOTE: i cannot calculate /timestamp until i am sure of the total number of frames
         print_flush(base_name + ' Extracting video metadata...')
-        expected_frames = store_meta_data(video_file, masked_image_file)
+        for _masked_image_file in masked_image_files:
+            expected_frames = store_meta_data(video_file, masked_image_file)
 
     else:
         expected_frames = 1
-    
-    # Initialize background subtraction if required
 
+    # Initialize background subtraction if required
+    # the background subtraction will be done on the whole FOV 
     if is_bgnd_subtraction:
         print_flush(base_name + ' Initializing background subtraction.')
         bgnd_subtractor = BackgroundSubtractorVideo(video_file, **bgnd_param)
@@ -273,15 +326,18 @@ def compressVideo(video_file, masked_image_file, mask_param,  expected_fps=25,
     # initialize timers
     print_flush(base_name + ' Starting video compression.')
 
-
     if expected_frames == 1:
         progressTime = TimeCounter('Compressing video.')
     else:
         #if we know the number of frames display it in the progress
         progressTime = TimeCounter('Compressing video.', expected_frames)
 
+    with ExitStack() as stack:
+        mask_fids = []
+        for _masked_image_file in masked_image_files:
+            mask_fids.append(stack.enter_context(tables.File(_masked_image_file,"r+")))
 
-    with tables.File(masked_image_file, "r+") as mask_fid:
+#    with tables.File(masked_image_file, "r+") as mask_fid:
 
         #initialize masks groups
         attr_params = dict(
@@ -289,20 +345,40 @@ def compressVideo(video_file, masked_image_file, mask_param,  expected_fps=25,
             microns_per_pixel = microns_per_pixel,
             is_light_background = int(mask_param['is_light_background'])
             )
-        mask_dataset, full_dataset, mean_intensity = initMasksGroups(mask_fid, 
-            expected_frames, vid.height, vid.width,
-            attr_params, save_full_interval)
         
-        if vid.dtype != np.uint8:
-            # this will worm as flags to be sure that the normalization took place.
-            normalization_range = mask_fid.create_earray('/', 
-                                        'normalization_range',
-                                        atom=tables.Float32Atom(),
-                                        shape=(0, 2),
-                                        expectedrows=expected_frames,
-                                        filters=TABLE_FILTERS
-                                        )
-    
+        # initialise datasets
+        mask_dataset = []
+        full_dataset = []
+        mean_intensity = []
+        normalization_range = []
+        for wc, mask_fid in enumerate(mask_fids): # wc = well counter
+            if is_fov_tosplit:
+                # here the different files will have different frame sizes...
+                _mask_dataset, _full_dataset, _mean_intensity = initMasksGroups(mask_fid,
+                    expected_frames, 
+                    fovsplitter.circles.iloc[wc]["height"], 
+                    fovsplitter.circles.iloc[wc]["width"],
+                    attr_params, save_full_interval)
+            else:
+                _mask_dataset, _full_dataset, _mean_intensity = initMasksGroups(mask_fid,
+                    expected_frames, vid.height, vid.width,
+                    attr_params, save_full_interval)
+            # making them list anyway, so have to append
+            mask_dataset.append(_mask_dataset)
+            full_dataset.append(_full_dataset)
+            mean_intensity.append(_mean_intensity)
+                
+            if vid.dtype != np.uint8:
+                # this will worm as flags to be sure that the normalization took place.
+                normalization_range.append(mask_fid.create_earray('/',
+                                               'normalization_range',
+                                               atom=tables.Float32Atom(),
+                                               shape=(0, 2),
+                                               expectedrows=expected_frames,
+                                               filters=TABLE_FILTERS
+                                               ))
+        
+        # loop on frames
         while frame_number < max_frame:
 
             ret, image = vid.read()
@@ -319,7 +395,8 @@ def compressVideo(video_file, masked_image_file, mask_param,  expected_fps=25,
                     # normalise image intensities if the data type is other
                     # than uint8
                     image, img_norm_range = normalizeImage(image)
-                    normalization_range.append(img_norm_range)
+                    for _normalization_range in normalization_range:
+                        _normalization_range.append(img_norm_range)
 
                 #limit the image range to 1 to 255, 0 is a reserved value for the background
                 assert image.dtype == np.uint8
@@ -327,9 +404,21 @@ def compressVideo(video_file, masked_image_file, mask_param,  expected_fps=25,
 
                 # Add a full frame every save_full_interval
                 if frame_number % save_full_interval == 1:
-                    full_dataset.append(image[np.newaxis, :, :])
+                    if is_fov_tosplit:
+                        # split image and append
+                        well_images = fovsplitter.tile_FOV(image)
+                        for wc, (well_name, well_image) in enumerate(well_images):
+                            # check we are writing to the right file
+                            assert well_name in mask_fids[wc].filename, "writing to the wrong file!!"
+                            full_dataset[wc].append(well_image[np.newaxis, :, :])
+                            
+                    else:
+                        # full_dataset is a list of 1 item
+                        full_dataset[0].append(image[np.newaxis, :, :])
+                        
                     full_frame_number += 1
 
+            
                 # buffer index
                 ind_buff = (frame_number - 1) % buffer_size
 
@@ -340,9 +429,20 @@ def compressVideo(video_file, masked_image_file, mask_param,  expected_fps=25,
 
                 # add image to the buffer
                 Ibuff[ind_buff, :, :] = image.copy()
-                mean_int = np.mean(image)
-                assert mean_int >= 0
-                mean_intensity.append(np.array([mean_int]))
+
+                def _append_int(_mean_intensity, _image):
+                    mean_int = np.mean(_image)
+                    assert mean_int >= 0
+                    _mean_intensity.append(np.array([mean_int]))
+                    
+                if is_fov_tosplit:
+                    well_images = fovsplitter.tile_FOV(image)
+                    for wc, (well_name, well_image) in enumerate(well_images):
+                        assert well_name in mask_fids[wc].filename, "writing to the wrong file!!"
+                        _append_int(mean_intensity[wc], well_image)
+                else:
+                    _append_int(mean_intensity[0], image)
+                    
 
             else:
                 # sometimes the last image is all zeros, control for this case
@@ -352,14 +452,14 @@ def compressVideo(video_file, masked_image_file, mask_param,  expected_fps=25,
 
                 # close the buffer
                 Ibuff = Ibuff[:ind_buff + 1]
-
+            
             # mask buffer and save data into the hdf5 file
-            if (ind_buff == buffer_size - 1 or ret == 0) and Ibuff.size > 0:                
+            if (ind_buff == buffer_size - 1 or ret == 0) and Ibuff.size > 0:
                 if is_bgnd_subtraction:
                     Ibuff_b  = bgnd_subtractor.apply(Ibuff, frame_number)
                 else:
                     Ibuff_b = Ibuff
-                
+
                 #calculate the max/min in the of the buffer
                 img_reduce = reduceBuffer(Ibuff_b, mask_param['is_light_background'])
 
@@ -368,13 +468,19 @@ def compressVideo(video_file, masked_image_file, mask_param,  expected_fps=25,
 
                 # add buffer to the hdf5 file
                 frame_first_buff = frame_number - Ibuff.shape[0]
-                mask_dataset.append(Ibuff)
+                if is_fov_tosplit:
+                    well_Ibuffs = fovsplitter.tile_FOV(Ibuff)
+                    for wc, (well_name, well_Ibuff) in enumerate(well_Ibuffs):
+                        assert well_name in mask_fids[wc].filename, "writing to the wrong file!!"
+                        mask_dataset[wc].append(well_Ibuff)
+                else:
+                    mask_dataset[0].append(Ibuff)
 
             if frame_number % 500 == 0:
                 # calculate the progress and put it in a string
                 progress_str = progressTime.get_str(frame_number)
                 print_flush(base_name + ' ' + progress_str)
-                
+
             # finish process
             if ret == 0:
                 break
@@ -382,8 +488,6 @@ def compressVideo(video_file, masked_image_file, mask_param,  expected_fps=25,
         # close the video
         vid.release()
 
-    read_and_save_timestamp(masked_image_file)
+    for masked_image_file in masked_image_files:
+        read_and_save_timestamp(masked_image_file)
     print_flush(base_name + ' Compressed video done.')
-    
-
-
