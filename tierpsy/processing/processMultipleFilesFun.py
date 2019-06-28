@@ -130,4 +130,5 @@ def processMultipleFilesFun(
 
 def tierpsy_process():
     args = ProcessMultipleFilesParser().parse_args()
+    print(args)
     processMultipleFilesFun(**vars(args))

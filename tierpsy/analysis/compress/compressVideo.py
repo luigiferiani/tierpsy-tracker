@@ -246,6 +246,8 @@ def compressVideo(video_file, masked_image_file, mask_param,  expected_fps=25,
 
     if len(fovsplitter_param) > 0:
         is_fov_tosplit = True
+        assert all(key in fovsplitter_param for key in ['total_n_wells', 'whichsideup'])
+        assert fovsplitter_param['total_n_wells']>0
     else:
         is_fov_tosplit = False
 
@@ -255,13 +257,7 @@ def compressVideo(video_file, masked_image_file, mask_param,  expected_fps=25,
     # select the video reader class according to the file type.
     vid = selectVideoReader(video_file); print(vid)
 
-    # TODO: make this triggered by input
-    is_fov_tosplit=True
 
-    # TODO: get these from input
-    if is_fov_tosplit:
-        fovsplitter_param['total_n_wells'] = 48
-        fovsplitter_param['whichsideup'] = 'upright'
     # initialise the class for FOV splitting
     if is_fov_tosplit:
         # TODO: change class creator so it only needs the video name? by using 
@@ -276,7 +272,13 @@ def compressVideo(video_file, masked_image_file, mask_param,  expected_fps=25,
                                             camera_name,
                                             total_n_wells=fovsplitter_param['total_n_wells'],
                                             whichsideup=fovsplitter_param['whichsideup'])
-        fovsplitter.plot_wells()
+        hf = fovsplitter.plot_wells()
+        figsavename = masked_image_file.replace('.hdf5','.png')
+        figsavename = figsavename.replace('metadata',fovsplitter.channel)
+        for ha in hf.axes:
+            ha.get_xaxis().set_visible(False)
+            ha.get_yaxis().set_visible(False)
+        hf.savefig(figsavename, bbox_inches='tight', pad_inches = 0, dpi=400)
 
     # create a list of masked_image_files
     if is_fov_tosplit:
@@ -297,8 +299,8 @@ def compressVideo(video_file, masked_image_file, mask_param,  expected_fps=25,
         with tables.File(_masked_image_file, "w") as mask_fid:
             pass
     # DEBUGGING ONLY:
-    with tables.File(masked_image_file, "w") as mask_fid:
-            pass
+#    with tables.File(masked_image_file, "w") as mask_fid:
+#            pass
         
     #Extract metadata
     if is_extract_timestamp:

@@ -9,6 +9,8 @@ import os
 import shutil
 import sys
 import time
+import pdb
+
 
 from tierpsy.analysis.compress_add_data.getAdditionalData import getAdditionalFiles
 from tierpsy.helper.params import TrackerParams
@@ -297,14 +299,29 @@ class ProcessLocalParser(ProcessLocal, ProcessWorkerParser):
             action='store_true',
             help='Copy files from an uncompleted analysis in the temporary directory.')
         
+        print("In __init__ of ProcessLocalParser\n")
+        print("********************\n")
+        print("sys.argv[0]:")
+        print(sys.argv[0])
+        print("Printing the args passed to self.parse_args\n")
+        for arg in sys_argv[1:]:
+            print(arg)
+        print("********************\n")
         args = self.parse_args(sys_argv[1:])
+        print("Printing parsed args")
+        print(args)
         ProcessLocal.__init__(self, **vars(args))
 
 
 if __name__ == '__main__':
     import subprocess
     import sys
-    
+    print("Main of ProcessLocal.py:\n")
+    print("____________________________")
+    print("printing sys.argv:\n")
+    for arg in sys.argv:
+        print(arg)
+    print("___________________________")
     #the local parser copy the tmp files into the tmp directory using its method start, and returns the command for the worm worker
     local_obj = ProcessLocalParser(sys.argv)
     worker_cmd = local_obj.start()

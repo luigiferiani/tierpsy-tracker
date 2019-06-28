@@ -428,8 +428,8 @@ class FOVMultiWellsSplitter(object):
                               rgba_color[:-1], 20)
         # add names of wells
         # plot, don't close
-        hf = plt.figure();
-        plt.imshow(_img)
+        hf = plt.figure(figsize=(10.06,7.59));
+        ha = plt.imshow(_img)
         if _is_wellnames:
             for i, _circle in self.circles.iterrows():
                 txt = "{} ({:d},{:d})".format(_circle.well,
@@ -444,4 +444,5 @@ class FOVMultiWellsSplitter(object):
                          "({:d},{:d})".format(int(_circle.row),int(_circle.col)),
                          fontsize=12,
                          color='r')
+        plt.axis('off')
         return hf

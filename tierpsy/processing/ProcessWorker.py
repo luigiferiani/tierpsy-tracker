@@ -59,7 +59,9 @@ class ProcessWorker(object):
             if this_point_exists:
                 print('this_point_exists', current_point)
                 break
-            
+            # debug only: plotting all arguments to spot provenance_file here
+            for k,v in self.ap.getArgs(current_point).items():
+                print(k, v)
             execThisPoint(current_point, 
                     **self.ap.getArgs(current_point),
                     pkgs_versions = pkgs_versions,

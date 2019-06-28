@@ -11,8 +11,8 @@ import warnings
 
 #get default parameters files
 from tierpsy import DFLT_PARAMS_PATH, DFLT_PARAMS_FILES
-from .docs_tracker_param import default_param, info_param, valid_options
-from .docs_analysis_points import dflt_analysis_points, dlft_analysis_type, deprecated_analysis_alias
+from tierpsy.helper.params.docs_tracker_param import default_param, info_param, valid_options
+from tierpsy.helper.params.docs_analysis_points import dflt_analysis_points, dlft_analysis_type, deprecated_analysis_alias
 
 #deprecated variables that will be ignored
 deprecated_fields = [
@@ -132,7 +132,8 @@ class TrackerParams:
 
 
 if __name__=='__main__':
-    json_file = ''
+#    json_file = ''
+    json_file = '/Users/lferiani/Desktop/Data_FOVsplitter/loopbio_rig_new_.json'
     params = TrackerParams(json_file)
     
 

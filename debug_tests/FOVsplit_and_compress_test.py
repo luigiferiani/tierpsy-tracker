@@ -24,7 +24,7 @@ from tierpsy.analysis.compress.selectVideoReader import selectVideoReader
 
 if platform == 'darwin':
     src = "/Users/lferiani/Desktop/Data_FOVsplitter/RawVideos/"
-    json_param_file = "/Users/lferiani/Desktop/Data_FOVsplitter/loopbio_rig_new.json"
+    json_param_file = "/Users/lferiani/Desktop/Data_FOVsplitter/loopbio_rig_new_.json"
 else:
     raise Exception ("Copy the data locally before starting and modify this script")
     
@@ -60,6 +60,13 @@ else:
 if "save_full_interval" not in json_param: json_param['save_full_interval'] = -1
 if "is_extract_timestamp" not in json_param: json_param['is_extract_timestamp'] = False
 
+
+# fovsplitter param
+fovsplitter_param_f = ['MWP_total_n_wells',
+                       'MWP_whichsideup']
+fovsplitter_param = {x.replace('MWP_',''):json_param[x] for x in fovsplitter_param_f}
+
+
 # put parameters together for processVideo.py
 compress_vid_param = {
         'buffer_size': json_param['compression_buff'],
@@ -68,15 +75,16 @@ compress_vid_param = {
         'bgnd_param': bgnd_param_mask,
         'expected_fps': json_param['expected_fps'],
         'microns_per_pixel' : json_param['microns_per_pixel'],
-        'is_extract_timestamp': json_param['is_extract_timestamp']
-    }                   
+        'is_extract_timestamp': json_param['is_extract_timestamp'],
+        'fovsplitter_param': fovsplitter_param,
+        }                   
                    
 
 # disable background subtraction
 compress_vid_param['bgnd_param'] = {}
 
 # set some parameters for background subtraction
-#compress_vid_param['bgnd_param'] = {'buff_size': 10, 'frame_gap': 10, 'is_light_background': False}
+#compress_vid_param['bgnd_param'] = {'buff_size': 10, 'frame_gap': 450, 'is_light_background': True}
 
 #%%             
 
@@ -114,7 +122,5 @@ for video_file in video_file_list[:1]:
     vc += 1
     
 #%%
-    
-
 
 

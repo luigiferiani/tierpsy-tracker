@@ -39,12 +39,16 @@ class CheckPoints(object):
         #load arguments
         mod = import_module('tierpsy.analysis.' + point.lower())
         self.args[point] = mod.args_(self.file_names, self.param)
-
+        with open('/Users/lferiani/Desktop/Data_FOVsplitter/log.txt','w') as fid:
+            print(self.args, file=fid)
+            print(self.args[point], file=fid)
         #add the file that it's going to be used for the provenance_file
         if not 'provenance_file' in self.args[point]:
             self.args[point]['provenance_file'] = self.args[point]['output_files'][0]
             assert self.args[point]['provenance_file'].endswith('.hdf5')
-
+        with open('/Users/lferiani/Desktop/Data_FOVsplitter/log.txt','a') as fid:
+            print(self.args, file=fid)
+            print(self.args[point], file=fid)
         #assert all the required fields exist
         expected_arguments = set(['func', 'argkws', 'input_files', 'output_files', 'requirements'])
         missing_fields = expected_arguments - set(self.args[point].keys())
@@ -64,6 +68,7 @@ class CheckPoints(object):
 class AnalysisPoints(object):
     def __init__(self, video_file, masks_dir, 
         results_dir, json_file = ''):
+        print("AnalysisPoints has been called")
 
         self.video_file = os.path.realpath(os.path.abspath(video_file))
         self.results_dir = os.path.realpath(os.path.abspath(results_dir))
